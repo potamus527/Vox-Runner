@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vox Runner</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #000;
+        color: white;
+        font-family: "Courier New", Courier, monospace;
+      }
+      canvas {
+        display: block;
+      }
+      #crosshair {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 10px;
+        height: 10px;
+        border: 2px solid white;
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        mix-blend-mode: difference;
+        display: none;
+      }
+      .ui-container {
+        position: absolute;
+        color: white;
+        background-color: rgba(10, 20, 30, 0.7);
+        border: 1px solid rgba(0, 255, 255, 0.5);
+        padding: 10px;
+        border-radius: 5px;
+        text-align: left;
+      }
+      #perks-display {
+        left: 10px;
+        top: 50px; /* Adjusted top position */
+      }
+      #level-display {
+        right: 10px;
+        top: 10px;
+        text-align: right;
+      }
+      #interaction-prompt {
+        bottom: 30px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+        text-align: center;
+      }
+      .overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        background-color: rgba(0, 0, 0, 0.8);
+        text-align: center;
+      }
+      .overlay h1 {
+        font-size: 4em;
+        margin-bottom: 20px;
+        color: #00c9ff;
+        text-shadow: 0 0 15px #00c9ff;
+      }
+      .overlay p {
+        font-size: 1.5em;
+        margin-bottom: 10px;
+      }
+      .overlay button {
+        font-size: 1.2em;
+        padding: 10px 20px;
+        background: transparent;
+        color: white;
+        border: 2px solid white;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background-color 0.3s, color 0.3s;
+      }
+      .overlay button:hover {
+        background-color: white;
+        color: black;
+      }
+      #start-screen,
+      #end-screen {
+        display: none; /* Hidden by default */
+      }
+      #stopwatch {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        font-size: 1.5em;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Start Screen -->
+    <div id="start-screen" class="overlay">
+      <h1>Vox Runner</h1>
+      <div id="high-score-display">
+        <p>High Score:</p>
+        <p>Round: <span id="high-score-round">0</span></p>
+        <p>Time: <span id="high-score-time">0.00s</span></p>
+      </div>
+      <br />
+      <button id="start-button">Start Game</button>
+    </div>
+
+    <!-- End Screen -->
+    <div id="end-screen" class="overlay">
+      <h1>Game Over</h1>
+      <p>You died on Round <span id="final-round">1</span></p>
+      <p>Your Time: <span id="final-time">0.00s</span></p>
+    </div>
+
+    <div id="crosshair"></div>
+    <div id="perks-display" class="ui-container" style="display: none">
+      <strong>Perks:</strong>
+      <ul id="perk-list"></ul>
+    </div>
+    <div id="level-display" class="ui-container">
+      Level: <span id="level-number">1</span>
+    </div>
+    <div id="stopwatch" class="ui-container">0.00s</div>
+    <div id="interaction-prompt" class="ui-container"></div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from "three";
+      import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
+      import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+      import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+      import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+
+      // ======== GAME STATE & UI ELEMENTS ========
+      let gameState = "start"; // 'start', 'playing', 'end'
+      const startScreen = document.getElementById("start-screen");
+      const endScreen = document.getElementById("end-screen");
+      const startButton = document.getElementById("start-button");
+      const highScoreRoundDisplay = document.getElementById("high-score-round");
+      const highScoreTimeDisplay = document.getElementById("high-score-time");
+      const finalRoundDisplay = document.getElementById("final-round");
+      const finalTimeDisplay = document.getElementById("final-time");
+      const stopwatchDisplay = document.getElementById("stopwatch");
+
+      // ======== HIGH SCORE & TIMING ========
+      let highScore = {
+        round: 0,
+        time: 0,
+      };
+      let roundStartTime = 0;
+      let totalTimePlayed = 0;
+
+      // ======== VISUAL & AUDIO ENHANCEMENTS ========
+      const colors = {
+        ambient: 0x5a189a, // Dark Purple
+        directional: 0x00c9ff, // Bright Cyan
+        hazard: 0xff0054, // Neon Pink/Red
+      };
+
+      const listener = new THREE.AudioListener();
+      const jumpSound = new THREE.Audio(listener);
+      const perkSound = new THREE.Audio(listener);
+      const levelSound = new THREE.Audio(listener);
+
+      // ======== BASIC SETUP ========
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(
+        75,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        1000
+      );
+      camera.add(listener);
+      const playerHeight = 1.7;
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      // ======== POST-PROCESSING (BLOOM) ========
+      const composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      const bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(window.innerWidth, window.innerHeight),
+        1.5,
+        0.4,
+        0.85
+      );
+      bloomPass.threshold = 0;
+      bloomPass.strength = 1.5;
+      bloomPass.radius = 0.2;
+      composer.addPass(bloomPass);
+
+      // ======== LIGHTING ========
+      const ambientLight = new THREE.AmbientLight(colors.ambient, 1.0);
+      scene.add(ambientLight);
+      const directionalLight = new THREE.DirectionalLight(
+        colors.directional,
+        1.5
+      );
+      directionalLight.position.set(15, 20, -25);
+      scene.add(directionalLight);
+
+      // ======== UPDATED: FUTURISTIC NIGHT SKYBOX & TEXTURES ========
+      const cubeTextureLoader = new THREE.CubeTextureLoader();
+      const textureLoader = new THREE.TextureLoader();
+
+      // These URLs link to a dark, purple/blue nebula cube map.
+      const skyboxTexture = cubeTextureLoader.load([
+        "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/cube/MilkyWay/dark-s_px.jpg",
+        "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/cube/MilkyWay/dark-s_nx.jpg",
+        "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/cube/MilkyWay/dark-s_py.jpg",
+        "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/cube/MilkyWay/dark-s_ny.jpg",
+        "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/cube/MilkyWay/dark-s_pz.jpg",
+        "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/cube/MilkyWay/dark-s_nz.jpg",
+      ]);
+      scene.background = skyboxTexture;
+
+      const platformDetailTexture = textureLoader.load(
+        "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/hardwood2_diffuse.jpg"
+      );
+      platformDetailTexture.wrapS = platformDetailTexture.wrapT =
+        THREE.RepeatWrapping;
+
+      const platformNormalTexture = textureLoader.load(
+        "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/hardwood2_bump.jpg"
+      );
+      platformNormalTexture.wrapS = platformNormalTexture.wrapT =
+        THREE.RepeatWrapping;
+
+      // ======== CONTROLS & PLAYER STATE ========
+      const controls = new PointerLockControls(camera, document.body);
+      startButton.addEventListener("click", startGame);
+
+      controls.addEventListener("lock", () => {
+        crosshair.style.display = "block";
+      });
+      controls.addEventListener("unlock", () => {
+        crosshair.style.display = "none";
+      });
+      scene.add(controls.getObject());
+      const crosshair = document.getElementById("crosshair");
+
+      const keys = {};
+      document.addEventListener("keydown", (e) => (keys[e.code] = true));
+      document.addEventListener("keyup", (e) => (keys[e.code] = false));
+      let moveSpeed = 5.0,
+        sprintMultiplier = 1.8,
+        jumpForce = 10.0;
+      let velocityY = 0,
+        onGround = true;
+      const jumpGravity = -30.0;
+      let fallGravity = -30.0;
+      let availableDoubleJumps = 0;
+      let doubleJumpsUsed = 0;
+
+      // ======== GAME STATE & OBSTACLE MANAGEMENT ========
+      let currentLevel = 0;
+      let currentLevelStartPoint = new THREE.Vector3(0, playerHeight, 5);
+      let nextLevelStartPoint = currentLevelStartPoint.clone();
+      let currentCourseGroup = new THREE.Group();
+      let currentPerkStation = null;
+      let currentGoal = null;
+      const perkIcons = [];
+      const interactionDistance = 3.0;
+      const deathPlaneY = -30;
+      const movingObstacles = [],
+        rotatingObstacles = [],
+        hazardObstacles = [];
+
+      const collectedPerks = { speed: 0, jump: 0, gravity: 0, doubleJump: 0 };
+
+      const clock = new THREE.Clock();
+      const interactionPrompt = document.getElementById("interaction-prompt");
+      const perksDisplay = document.getElementById("perks-display");
+      const perkList = document.getElementById("perk-list");
+      const levelUI = document.getElementById("level-number");
+
+      // ======== PERK DEFINITIONS ========
+      const perks = {
+        speed: {
+          id: "speed",
+          name: "Speed Boost",
+          description: "Increases movement speed by 15%.",
+          apply: () => {
+            moveSpeed *= 1.15;
+          },
+          iconGeo: new THREE.BoxGeometry(0.6, 0.6, 0.6),
+          iconMat: new THREE.MeshStandardMaterial({
+            color: 0x3498db,
+            emissive: 0x3498db,
+            emissiveIntensity: 2,
+          }),
+        },
+        jump: {
+          id: "jump",
+          name: "Higher Jump",
+          description: "Increases jump force by 18%.",
+          apply: () => {
+            jumpForce *= 1.18;
+          },
+          iconGeo: new THREE.SphereGeometry(0.35, 16, 16),
+          iconMat: new THREE.MeshStandardMaterial({
+            color: 0x2ecc71,
+            emissive: 0x2ecc71,
+            emissiveIntensity: 2,
+          }),
+        },
+        gravity: {
+          id: "gravity",
+          name: "Feather Fall",
+          description: "Reduces falling gravity by 25%.",
+          apply: () => {
+            fallGravity *= 0.75;
+          },
+          iconGeo: new THREE.ConeGeometry(0.3, 0.7, 16),
+          iconMat: new THREE.MeshStandardMaterial({
+            color: 0xf1c40f,
+            emissive: 0xf1c40f,
+            emissiveIntensity: 2,
+          }),
+        },
+        doubleJump: {
+          id: "doubleJump",
+          name: "Double Jump",
+          description: "Grants an additional jump in mid-air.",
+          apply: () => {
+            availableDoubleJumps++;
+          },
+          iconGeo: new THREE.TorusGeometry(0.4, 0.15, 16, 100),
+          iconMat: new THREE.MeshStandardMaterial({
+            color: 0x9b59b6,
+            emissive: 0x9b59b6,
+            emissiveIntensity: 2,
+          }),
+        },
+      };
+
+      // ======== CORE GAME LOGIC ========
+      function loadHighScore() {
+        const storedScore = localStorage.getItem("voxRunnerHighScore");
+        if (storedScore) {
+          highScore = JSON.parse(storedScore);
+        }
+        highScoreRoundDisplay.textContent = highScore.round;
+        highScoreTimeDisplay.textContent = `${highScore.time.toFixed(2)}s`;
+      }
+
+      function saveHighScore() {
+        if (
+          currentLevel > highScore.round ||
+          (currentLevel === highScore.round && totalTimePlayed > highScore.time)
+        ) {
+          highScore.round = currentLevel;
+          highScore.time = totalTimePlayed;
+          localStorage.setItem("voxRunnerHighScore", JSON.stringify(highScore));
+        }
+      }
+
+      function startGame() {
+        gameState = "playing";
+        startScreen.style.display = "none";
+        controls.lock();
+
+        // Reset game state for a new run
+        currentLevel = 0;
+        moveSpeed = 5.0;
+        jumpForce = 10.0;
+        fallGravity = -30.0;
+        availableDoubleJumps = 0;
+        for (const key in collectedPerks) {
+          collectedPerks[key] = 0;
+        }
+        updatePerkListUI();
+
+        roundStartTime = clock.getElapsedTime();
+        totalTimePlayed = 0;
+
+        nextLevel();
+      }
+
+      function endGame() {
+        gameState = "end";
+        controls.unlock();
+        crosshair.style.display = "none";
+
+        totalTimePlayed = clock.getElapsedTime() - roundStartTime;
+        saveHighScore();
+
+        finalRoundDisplay.textContent = currentLevel;
+        finalTimeDisplay.textContent = `${totalTimePlayed.toFixed(2)}s`;
+        endScreen.style.display = "flex";
+
+        setTimeout(() => {
+          endScreen.style.display = "none";
+          showStartScreen();
+        }, 4000); // Show end screen for 4 seconds
+      }
+
+      function showStartScreen() {
+        gameState = "start";
+        loadHighScore();
+        startScreen.style.display = "flex";
+      }
+
+      function createPerkStation(position) {
+        if (currentPerkStation) scene.remove(currentPerkStation);
+        currentPerkStation = new THREE.Group();
+        perkIcons.length = 0;
+
+        if (currentLevel > 0 && currentLevel % 20 === 0) {
+          const perk = perks.doubleJump;
+          const perkIcon = new THREE.Mesh(perk.iconGeo, perk.iconMat);
+          perkIcon.position.set(0, 1.2, -2);
+          perkIcon.userData.perkId = perk.id;
+          currentPerkStation.add(perkIcon);
+          perkIcons.push(perkIcon);
+        } else {
+          Object.values(perks).forEach((perk) => {
+            if (perk.id === "doubleJump") return;
+            const index = Object.keys(perks).indexOf(perk.id);
+            const angle = (index / 3) * Math.PI * 2 + Math.PI / 2;
+            const perkIcon = new THREE.Mesh(perk.iconGeo, perk.iconMat);
+            perkIcon.position.set(
+              Math.cos(angle) * 2.5,
+              1.2,
+              Math.sin(angle) * 2.5 - 2
+            );
+            perkIcon.userData.perkId = perk.id;
+            currentPerkStation.add(perkIcon);
+            perkIcons.push(perkIcon);
+          });
+        }
+
+        currentPerkStation.position.copy(position);
+        currentPerkStation.position.y -= 1;
+        scene.add(currentPerkStation);
+      }
+
+      function generateCourse(level, startPosition) {
+        let lastPlatformPos = startPosition.clone();
+        lastPlatformPos.y -= 1;
+        const platforms = [];
+
+        const startPlatformGeo = new THREE.BoxGeometry(10, 2, 10);
+        const startPlatformMat = new THREE.MeshStandardMaterial({
+          color: 0x9b59b6, // Keep start platform a distinct purple
+          map: platformDetailTexture,
+          normalMap: platformNormalTexture,
+          roughness: 0.6,
+          metalness: 0.4,
+        });
+        const startPlatform = new THREE.Mesh(
+          startPlatformGeo,
+          startPlatformMat
+        );
+        startPlatform.position.copy(lastPlatformPos);
+        addWireframe(startPlatform, 0xffffff); // Add a white wireframe
+        platforms.push(startPlatform);
+
+        const numPlatforms = 7 + level * 2;
+        const minPlatformSize = Math.max(1.5, 4 - level * 0.25);
+
+        for (let i = 0; i < numPlatforms; i++) {
+          const sizeX = THREE.MathUtils.randFloat(
+            minPlatformSize,
+            minPlatformSize + 3
+          );
+          const sizeZ = THREE.MathUtils.randFloat(
+            minPlatformSize,
+            minPlatformSize + 3
+          );
+          const platformGeo = new THREE.BoxGeometry(sizeX, 2, sizeZ);
+
+          const platformMat = new THREE.MeshStandardMaterial({
+            map: platformDetailTexture,
+            normalMap: platformNormalTexture,
+            roughness: 0.6,
+            metalness: 0.4,
+          });
+
+          const hue = 0.5 + i * 0.05; // Cycle through blues, purples, and pinks
+          platformMat.color.setHSL(hue, 0.8, 0.6);
+
+          const platform = new THREE.Mesh(platformGeo, platformMat);
+
+          const wireframeColor = new THREE.Color().setHSL(hue, 0.9, 0.8);
+          addWireframe(platform, wireframeColor);
+
+          const newPos = lastPlatformPos.clone();
+          newPos.z -= THREE.MathUtils.randFloat(4.5, 7 + level * 0.5);
+          newPos.x += THREE.MathUtils.randFloat(-4.0, 4.0);
+          newPos.y += THREE.MathUtils.randFloat(-1.0, 1.0 + level * 0.2);
+          platform.position.copy(newPos);
+          lastPlatformPos = newPos;
+
+          const obstacleType = Math.random();
+          if (level > 1 && obstacleType < 0.2) {
+            // Moving
+            platform.userData.type = "moving";
+            platform.userData.moveAxis = Math.random() < 0.5 ? "x" : "z";
+            platform.userData.moveDist = Math.random() * 2 + 2;
+            platform.userData.moveSpeed = Math.random() * 0.5 + 0.5;
+            platform.userData.initialPosition = platform.position.clone();
+            movingObstacles.push(platform);
+          } else if (level > 2 && obstacleType < 0.3) {
+            // Rotating
+            platform.userData.type = "rotating";
+            platform.userData.rotateSpeed = (Math.random() - 0.5) * 1.5;
+            rotatingObstacles.push(platform);
+          } else if (level > 3 && obstacleType < 0.4) {
+            // Hazard
+            const hazard = new THREE.Mesh(
+              new THREE.IcosahedronGeometry(1.2, 0),
+              new THREE.MeshStandardMaterial({
+                color: colors.hazard,
+                emissive: colors.hazard,
+                emissiveIntensity: 2.5,
+              })
+            );
+            hazard.position.copy(platform.position).y += 1.75;
+            hazard.userData.type = "hazard";
+            platforms.push(hazard);
+            hazardObstacles.push(hazard);
+          }
+          platforms.push(platform);
+        }
+        platforms.forEach((p) => currentCourseGroup.add(p));
+        return lastPlatformPos;
+      }
+
+      function addWireframe(mesh, color) {
+        const wireframeGeo = new THREE.WireframeGeometry(mesh.geometry);
+        const wireframeMat = new THREE.LineBasicMaterial({
+          color: color,
+          linewidth: 2,
+          transparent: true,
+          opacity: 0.3,
+        });
+        const wireframe = new THREE.LineSegments(wireframeGeo, wireframeMat);
+        mesh.add(wireframe);
+      }
+
+      function nextLevel() {
+        scene.remove(currentCourseGroup, currentPerkStation, currentGoal);
+        movingObstacles.length = 0;
+        rotatingObstacles.length = 0;
+        hazardObstacles.length = 0;
+        currentLevel++;
+        levelUI.textContent = currentLevel;
+        currentCourseGroup = new THREE.Group();
+        scene.add(currentCourseGroup);
+        currentLevelStartPoint.copy(nextLevelStartPoint);
+        createPerkStation(currentLevelStartPoint);
+        const courseEndPoint = generateCourse(
+          currentLevel,
+          currentLevelStartPoint
+        );
+        nextLevelStartPoint = courseEndPoint.clone();
+        nextLevelStartPoint.y += playerHeight + 1;
+        const goalPos = courseEndPoint.clone();
+        goalPos.y += 2.0;
+        currentGoal = new THREE.Mesh(
+          new THREE.TorusKnotGeometry(1, 0.4, 100, 16),
+          new THREE.MeshStandardMaterial({
+            color: 0xffd700,
+            emissive: 0xffd700,
+            emissiveIntensity: 2.5,
+          })
+        );
+        currentGoal.position.copy(goalPos);
+        scene.add(currentGoal);
+        resetPlayer();
+      }
+
+      function resetPlayer(isDeath = false) {
+        if (isDeath) {
+          endGame();
+          return;
+        }
+        const playerPosition = controls.getObject().position;
+        playerPosition.copy(currentLevelStartPoint);
+        playerPosition.y += 0.1;
+        velocityY = 0;
+      }
+
+      function updateMovement(delta) {
+        const playerPos = controls.getObject().position;
+        if (playerPos.y < deathPlaneY) {
+          resetPlayer(true); // Player has fallen and died
+          return;
+        }
+
+        if (keys["Space"]) {
+          if (onGround) {
+            velocityY = jumpForce;
+            onGround = false;
+          } else if (doubleJumpsUsed < availableDoubleJumps) {
+            velocityY = jumpForce;
+            doubleJumpsUsed++;
+          }
+          keys["Space"] = false;
+        }
+
+        if (!onGround) {
+          const currentGravity = velocityY > 0 ? jumpGravity : fallGravity;
+          velocityY += currentGravity * delta;
+        }
+
+        const isSprinting = keys["ShiftLeft"] || keys["ShiftRight"];
+        const currentSpeed = moveSpeed * (isSprinting ? sprintMultiplier : 1.0);
+        const speed = currentSpeed * delta;
+        if (keys["KeyW"]) controls.moveForward(speed);
+        if (keys["KeyS"]) controls.moveForward(-speed);
+        if (keys["KeyA"]) controls.moveRight(-speed);
+        if (keys["KeyD"]) controls.moveRight(speed);
+
+        playerPos.y += velocityY * delta;
+
+        let isOnPlatform = false;
+        const raycaster = new THREE.Raycaster(
+          playerPos,
+          new THREE.Vector3(0, -1, 0)
+        );
+        const intersects = raycaster.intersectObjects(
+          currentCourseGroup.children
+        );
+
+        if (
+          intersects.length > 0 &&
+          intersects[0].distance < playerHeight + 0.1
+        ) {
+          const groundObject = intersects[0].object;
+          if (groundObject.userData.type === "hazard") {
+            resetPlayer(true); // Player hit a hazard and died
+            return;
+          }
+          playerPos.y = intersects[0].point.y + playerHeight;
+          velocityY = 0;
+          isOnPlatform = true;
+          doubleJumpsUsed = 0;
+        }
+        onGround = isOnPlatform;
+      }
+
+      function updatePerkListUI() {
+        perkList.innerHTML = "";
+        perksDisplay.style.display = "none";
+
+        for (const id in collectedPerks) {
+          const count = collectedPerks[id];
+          if (count > 0) {
+            perksDisplay.style.display = "block";
+            const perk = perks[id];
+            const li = document.createElement("li");
+            li.textContent = perk.name + (count > 1 ? ` x${count}` : "");
+            perkList.appendChild(li);
+          }
+        }
+      }
+
+      function handleInteractions() {
+        let promptToShow = null;
+        if (currentPerkStation && perkIcons.length > 0) {
+          for (const icon of perkIcons) {
+            if (
+              camera.position.distanceTo(
+                icon.getWorldPosition(new THREE.Vector3())
+              ) < interactionDistance
+            ) {
+              const perk = perks[icon.userData.perkId];
+              promptToShow = `Press [E] to get <strong>${perk.name}</strong><br><small>${perk.description}</small>`;
+              break;
+            }
+          }
+        }
+        if (
+          currentGoal &&
+          camera.position.distanceTo(currentGoal.position) < interactionDistance
+        ) {
+          promptToShow = `Press [E] to advance to Level ${currentLevel + 1}!`;
+        }
+        interactionPrompt.style.display = promptToShow ? "block" : "none";
+        if (promptToShow) interactionPrompt.innerHTML = promptToShow;
+      }
+
+      function onKeyE() {
+        if (
+          currentGoal &&
+          camera.position.distanceTo(currentGoal.position) < interactionDistance
+        ) {
+          nextLevel();
+          return;
+        }
+        if (currentPerkStation && perkIcons.length > 0) {
+          for (const icon of perkIcons) {
+            if (
+              camera.position.distanceTo(
+                icon.getWorldPosition(new THREE.Vector3())
+              ) < interactionDistance
+            ) {
+              const perk = perks[icon.userData.perkId];
+              perk.apply();
+              collectedPerks[perk.id]++;
+              updatePerkListUI();
+              perkIcons.forEach((p_icon) => currentPerkStation.remove(p_icon));
+              perkIcons.length = 0;
+              interactionPrompt.style.display = "none";
+              return;
+            }
+          }
+        }
+      }
+      document.addEventListener("keydown", (e) => {
+        if (e.code === "KeyE") onKeyE();
+      });
+
+      // ======== RENDER LOOP ========
+      function animate() {
+        requestAnimationFrame(animate);
+        const delta = clock.getDelta();
+        const elapsedTime = clock.getElapsedTime();
+
+        if (gameState === "playing") {
+          if (controls.isLocked) {
+            updateMovement(delta);
+            handleInteractions();
+          }
+
+          // Update stopwatch
+          totalTimePlayed = elapsedTime - roundStartTime;
+          stopwatchDisplay.textContent = `${totalTimePlayed.toFixed(2)}s`;
+
+          // Dynamic object updates
+          movingObstacles.forEach((obs) => {
+            const movement =
+              Math.sin(elapsedTime * obs.userData.moveSpeed) *
+              obs.userData.moveDist;
+            obs.position[obs.userData.moveAxis] =
+              obs.userData.initialPosition[obs.userData.moveAxis] + movement;
+          });
+          rotatingObstacles.forEach((obs) => {
+            obs.rotation.y += obs.userData.rotateSpeed * delta;
+          });
+          perkIcons.forEach((icon) => {
+            icon.rotation.y += 1.0 * delta;
+          });
+          if (currentGoal) currentGoal.rotation.y += 1.5 * delta;
+        }
+
+        composer.render();
+      }
+
+      // Initial setup
+      showStartScreen();
+      animate();
+    </script>
+  </body>
+</html>
