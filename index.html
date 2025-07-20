@@ -99,6 +99,72 @@
         left: 10px;
         font-size: 1.5em;
       }
+      /* --- THEMED MOBILE CONTROLS (FLIPPED) --- */
+      #mobile-controls {
+        position: absolute;
+        bottom: 20px;
+        width: 100%;
+        display: none;
+        justify-content: space-between;
+        align-items: flex-end;
+        padding: 0 20px;
+        box-sizing: border-box;
+        pointer-events: none; /* Let touches pass through the container */
+      }
+
+      .joystick-container,
+      .action-buttons {
+        pointer-events: auto; /* Re-enable touch events for children */
+      }
+
+      /* Joystick on the left */
+      .joystick-container {
+        width: 130px;
+        height: 130px;
+        background-color: rgba(10, 20, 30, 0.5);
+        border: 2px solid rgba(0, 255, 255, 0.5);
+        border-radius: 50%;
+        position: relative;
+      }
+      #joystick-thumb {
+        width: 60px;
+        height: 60px;
+        background-color: rgba(0, 255, 255, 0.7);
+        border: 1px solid #fff;
+        border-radius: 50%;
+        position: absolute;
+        top: 33px; /* Centered */
+        left: 33px; /* Centered */
+        box-shadow: 0 0 10px #00c9ff;
+      }
+
+      /* Action buttons on the right */
+      .action-buttons {
+        display: flex;
+        flex-direction: column-reverse; /* Stack interact on top of jump */
+        align-items: center;
+      }
+      .action-button {
+        width: 75px;
+        height: 75px;
+        background-color: rgba(10, 20, 30, 0.6);
+        border: 2px solid rgba(0, 255, 255, 0.5);
+        border-radius: 15px; /* More of a squircle */
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-size: 1.2em;
+        font-weight: bold;
+        color: #00c9ff;
+        text-shadow: 0 0 8px #00c9ff;
+        margin-bottom: 20px;
+        user-select: none;
+        -webkit-user-select: none;
+        transform: rotate(45deg); /* Cyberpunk angle */
+      }
+      .action-button-text {
+        transform: rotate(-45deg); /* Counter-rotate text */
+      }
     </style>
   </head>
   <body>
@@ -119,6 +185,21 @@
       <h1>Game Over</h1>
       <p>You died on Round <span id="final-round">1</span></p>
       <p>Your Time: <span id="final-time">0.00s</span></p>
+    </div>
+
+    <!-- FLIPPED MOBILE CONTROLS -->
+    <div id="mobile-controls">
+      <div class="joystick-container" id="joystick-container">
+        <div id="joystick-thumb"></div>
+      </div>
+      <div class="action-buttons">
+        <div class="action-button" id="jump-button">
+          <span class="action-button-text">JUMP</span>
+        </div>
+        <div class="action-button" id="interact-button">
+          <span class="action-button-text">E</span>
+        </div>
+      </div>
     </div>
 
     <div id="crosshair"></div>
@@ -148,8 +229,9 @@
       import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
       import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 
-      // ======== GAME STATE & UI ELEMENTS ========
-      let gameState = "start"; // 'start', 'playing', 'end'
+      const isMobile = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+
+      let gameState = "start";
       const startScreen = document.getElementById("start-screen");
       const endScreen = document.getElementById("end-screen");
       const startButton = document.getElementById("start-button");
@@ -158,28 +240,19 @@
       const finalRoundDisplay = document.getElementById("final-round");
       const finalTimeDisplay = document.getElementById("final-time");
       const stopwatchDisplay = document.getElementById("stopwatch");
+      const mobileControls = document.getElementById("mobile-controls");
 
-      // ======== HIGH SCORE & TIMING ========
-      let highScore = {
-        round: 0,
-        time: 0,
-      };
+      let highScore = { round: 0, time: 0 };
       let roundStartTime = 0;
       let totalTimePlayed = 0;
 
-      // ======== VISUAL & AUDIO ENHANCEMENTS ========
       const colors = {
-        ambient: 0x5a189a, // Dark Purple
-        directional: 0x00c9ff, // Bright Cyan
-        hazard: 0xff0054, // Neon Pink/Red
+        ambient: 0x5a189a,
+        directional: 0x00c9ff,
+        hazard: 0xff0054,
       };
 
       const listener = new THREE.AudioListener();
-      const jumpSound = new THREE.Audio(listener);
-      const perkSound = new THREE.Audio(listener);
-      const levelSound = new THREE.Audio(listener);
-
-      // ======== BASIC SETUP ========
       const scene = new THREE.Scene();
       const camera = new THREE.PerspectiveCamera(
         75,
@@ -193,7 +266,6 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
       document.body.appendChild(renderer.domElement);
 
-      // ======== POST-PROCESSING (BLOOM) ========
       const composer = new EffectComposer(renderer);
       composer.addPass(new RenderPass(scene, camera));
       const bloomPass = new UnrealBloomPass(
@@ -207,7 +279,6 @@
       bloomPass.radius = 0.2;
       composer.addPass(bloomPass);
 
-      // ======== LIGHTING ========
       const ambientLight = new THREE.AmbientLight(colors.ambient, 1.0);
       scene.add(ambientLight);
       const directionalLight = new THREE.DirectionalLight(
@@ -217,11 +288,8 @@
       directionalLight.position.set(15, 20, -25);
       scene.add(directionalLight);
 
-      // ======== UPDATED: FUTURISTIC NIGHT SKYBOX & TEXTURES ========
       const cubeTextureLoader = new THREE.CubeTextureLoader();
       const textureLoader = new THREE.TextureLoader();
-
-      // These URLs link to a dark, purple/blue nebula cube map.
       const skyboxTexture = cubeTextureLoader.load([
         "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/cube/MilkyWay/dark-s_px.jpg",
         "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/cube/MilkyWay/dark-s_nx.jpg",
@@ -237,29 +305,30 @@
       );
       platformDetailTexture.wrapS = platformDetailTexture.wrapT =
         THREE.RepeatWrapping;
-
       const platformNormalTexture = textureLoader.load(
         "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/hardwood2_bump.jpg"
       );
       platformNormalTexture.wrapS = platformNormalTexture.wrapT =
         THREE.RepeatWrapping;
 
-      // ======== CONTROLS & PLAYER STATE ========
-      const controls = new PointerLockControls(camera, document.body);
-      startButton.addEventListener("click", startGame);
-
-      controls.addEventListener("lock", () => {
-        crosshair.style.display = "block";
-      });
-      controls.addEventListener("unlock", () => {
-        crosshair.style.display = "none";
-      });
-      scene.add(controls.getObject());
+      let controls;
       const crosshair = document.getElementById("crosshair");
+      if (!isMobile) {
+        controls = new PointerLockControls(camera, document.body);
+        controls.addEventListener("lock", () => {
+          crosshair.style.display = "block";
+        });
+        controls.addEventListener("unlock", () => {
+          crosshair.style.display = "none";
+        });
+        scene.add(controls.getObject());
+      }
 
+      startButton.addEventListener("click", startGame);
       const keys = {};
       document.addEventListener("keydown", (e) => (keys[e.code] = true));
       document.addEventListener("keyup", (e) => (keys[e.code] = false));
+
       let moveSpeed = 5.0,
         sprintMultiplier = 1.8,
         jumpForce = 10.0;
@@ -270,7 +339,127 @@
       let availableDoubleJumps = 0;
       let doubleJumpsUsed = 0;
 
-      // ======== GAME STATE & OBSTACLE MANAGEMENT ========
+      let lookTouch = null;
+      let joystickTouch = null;
+      const lookSensitivity = 0.004;
+      const joystickContainer = document.getElementById("joystick-container");
+      const joystickThumb = document.getElementById("joystick-thumb");
+      const jumpButton = document.getElementById("jump-button");
+      const interactButton = document.getElementById("interact-button");
+
+      if (isMobile) {
+        document.addEventListener(
+          "touchstart",
+          (e) => {
+            const target = e.target;
+            if (
+              target.tagName === "BUTTON" ||
+              target.classList.contains("action-button-text") ||
+              target.parentElement.classList.contains("action-button")
+            ) {
+              return;
+            }
+            e.preventDefault();
+
+            for (const touch of e.changedTouches) {
+              // Joystick is on the LEFT, Look is on the RIGHT
+              if (touch.clientX < window.innerWidth / 2) {
+                if (!joystickTouch) {
+                  joystickTouch = { id: touch.identifier };
+                  handleJoystickMove(touch);
+                }
+              } else {
+                if (!lookTouch) {
+                  lookTouch = {
+                    id: touch.identifier,
+                    x: touch.clientX,
+                    y: touch.clientY,
+                  };
+                }
+              }
+            }
+          },
+          { passive: false }
+        );
+
+        document.addEventListener(
+          "touchmove",
+          (e) => {
+            e.preventDefault();
+            for (const touch of e.changedTouches) {
+              if (joystickTouch && touch.identifier === joystickTouch.id) {
+                handleJoystickMove(touch);
+              } else if (lookTouch && touch.identifier === lookTouch.id) {
+                handleLookMove(touch);
+              }
+            }
+          },
+          { passive: false }
+        );
+
+        document.addEventListener("touchend", (e) => {
+          for (const touch of e.changedTouches) {
+            if (joystickTouch && touch.identifier === joystickTouch.id) {
+              joystickTouch = null;
+              resetJoystick();
+            } else if (lookTouch && touch.identifier === lookTouch.id) {
+              lookTouch = null;
+            }
+          }
+        });
+
+        jumpButton.addEventListener("touchstart", () => (keys["Space"] = true));
+        jumpButton.addEventListener("touchend", () => (keys["Space"] = false));
+        interactButton.addEventListener(
+          "touchstart",
+          () => (keys["KeyE"] = true)
+        );
+        interactButton.addEventListener("touchend", () => {
+          keys["KeyE"] = false;
+          onKeyE();
+        });
+      }
+
+      function handleLookMove(touch) {
+        const deltaX = touch.clientX - lookTouch.x;
+        const deltaY = touch.clientY - lookTouch.y;
+        lookTouch.x = touch.clientX;
+        lookTouch.y = touch.clientY;
+
+        const euler = new THREE.Euler(0, 0, 0, "YXZ");
+        euler.setFromQuaternion(camera.quaternion);
+        euler.y -= deltaX * lookSensitivity;
+        euler.x -= deltaY * lookSensitivity;
+        euler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, euler.x));
+        camera.quaternion.setFromEuler(euler);
+      }
+
+      function handleJoystickMove(touch) {
+        const rect = joystickContainer.getBoundingClientRect();
+        const x = touch.clientX - rect.left - rect.width / 2;
+        const y = touch.clientY - rect.top - rect.height / 2;
+        const distance = Math.min(rect.width / 2, Math.sqrt(x * x + y * y));
+        const angle = Math.atan2(y, x);
+
+        const thumbX = distance * Math.cos(angle);
+        const thumbY = distance * Math.sin(angle);
+        joystickThumb.style.transform = `translate(${thumbX}px, ${thumbY}px)`;
+
+        const deadZone = 10;
+        keys["KeyW"] = y < -deadZone;
+        keys["KeyS"] = y > deadZone;
+        keys["KeyA"] = x < -deadZone;
+        keys["KeyD"] = x > deadZone;
+      }
+
+      function resetJoystick() {
+        joystickThumb.style.transform = `translate(0px, 0px)`;
+        keys["KeyW"] = false;
+        keys["KeyS"] = false;
+        keys["KeyA"] = false;
+        keys["KeyD"] = false;
+      }
+
       let currentLevel = 0;
       let currentLevelStartPoint = new THREE.Vector3(0, playerHeight, 5);
       let nextLevelStartPoint = currentLevelStartPoint.clone();
@@ -283,16 +472,13 @@
       const movingObstacles = [],
         rotatingObstacles = [],
         hazardObstacles = [];
-
       const collectedPerks = { speed: 0, jump: 0, gravity: 0, doubleJump: 0 };
-
       const clock = new THREE.Clock();
       const interactionPrompt = document.getElementById("interaction-prompt");
       const perksDisplay = document.getElementById("perks-display");
       const perkList = document.getElementById("perk-list");
       const levelUI = document.getElementById("level-number");
 
-      // ======== PERK DEFINITIONS ========
       const perks = {
         speed: {
           id: "speed",
@@ -352,7 +538,6 @@
         },
       };
 
-      // ======== CORE GAME LOGIC ========
       function loadHighScore() {
         const storedScore = localStorage.getItem("voxRunnerHighScore");
         if (storedScore) {
@@ -376,9 +561,14 @@
       function startGame() {
         gameState = "playing";
         startScreen.style.display = "none";
-        controls.lock();
 
-        // Reset game state for a new run
+        if (!isMobile) {
+          controls.lock();
+        } else {
+          mobileControls.style.display = "flex";
+          crosshair.style.display = "block";
+        }
+
         currentLevel = 0;
         moveSpeed = 5.0;
         jumpForce = 10.0;
@@ -388,21 +578,22 @@
           collectedPerks[key] = 0;
         }
         updatePerkListUI();
-
         roundStartTime = clock.getElapsedTime();
         totalTimePlayed = 0;
-
         nextLevel();
       }
 
       function endGame() {
         gameState = "end";
-        controls.unlock();
-        crosshair.style.display = "none";
+        if (!isMobile) {
+          controls.unlock();
+        } else {
+          mobileControls.style.display = "none";
+          crosshair.style.display = "none";
+        }
 
         totalTimePlayed = clock.getElapsedTime() - roundStartTime;
         saveHighScore();
-
         finalRoundDisplay.textContent = currentLevel;
         finalTimeDisplay.textContent = `${totalTimePlayed.toFixed(2)}s`;
         endScreen.style.display = "flex";
@@ -410,7 +601,7 @@
         setTimeout(() => {
           endScreen.style.display = "none";
           showStartScreen();
-        }, 4000); // Show end screen for 4 seconds
+        }, 4000);
       }
 
       function showStartScreen() {
@@ -460,7 +651,7 @@
 
         const startPlatformGeo = new THREE.BoxGeometry(10, 2, 10);
         const startPlatformMat = new THREE.MeshStandardMaterial({
-          color: 0x9b59b6, // Keep start platform a distinct purple
+          color: 0x9b59b6,
           map: platformDetailTexture,
           normalMap: platformNormalTexture,
           roughness: 0.6,
@@ -471,7 +662,7 @@
           startPlatformMat
         );
         startPlatform.position.copy(lastPlatformPos);
-        addWireframe(startPlatform, 0xffffff); // Add a white wireframe
+        addWireframe(startPlatform, 0xffffff);
         platforms.push(startPlatform);
 
         const numPlatforms = 7 + level * 2;
@@ -487,7 +678,6 @@
             minPlatformSize + 3
           );
           const platformGeo = new THREE.BoxGeometry(sizeX, 2, sizeZ);
-
           const platformMat = new THREE.MeshStandardMaterial({
             map: platformDetailTexture,
             normalMap: platformNormalTexture,
@@ -495,11 +685,9 @@
             metalness: 0.4,
           });
 
-          const hue = 0.5 + i * 0.05; // Cycle through blues, purples, and pinks
+          const hue = 0.5 + i * 0.05;
           platformMat.color.setHSL(hue, 0.8, 0.6);
-
           const platform = new THREE.Mesh(platformGeo, platformMat);
-
           const wireframeColor = new THREE.Color().setHSL(hue, 0.9, 0.8);
           addWireframe(platform, wireframeColor);
 
@@ -512,7 +700,6 @@
 
           const obstacleType = Math.random();
           if (level > 1 && obstacleType < 0.2) {
-            // Moving
             platform.userData.type = "moving";
             platform.userData.moveAxis = Math.random() < 0.5 ? "x" : "z";
             platform.userData.moveDist = Math.random() * 2 + 2;
@@ -520,12 +707,10 @@
             platform.userData.initialPosition = platform.position.clone();
             movingObstacles.push(platform);
           } else if (level > 2 && obstacleType < 0.3) {
-            // Rotating
             platform.userData.type = "rotating";
             platform.userData.rotateSpeed = (Math.random() - 0.5) * 1.5;
             rotatingObstacles.push(platform);
           } else if (level > 3 && obstacleType < 0.4) {
-            // Hazard
             const hazard = new THREE.Mesh(
               new THREE.IcosahedronGeometry(1.2, 0),
               new THREE.MeshStandardMaterial({
@@ -594,16 +779,20 @@
           endGame();
           return;
         }
-        const playerPosition = controls.getObject().position;
+        const playerPosition = isMobile
+          ? camera.position
+          : controls.getObject().position;
         playerPosition.copy(currentLevelStartPoint);
         playerPosition.y += 0.1;
         velocityY = 0;
       }
 
       function updateMovement(delta) {
-        const playerPos = controls.getObject().position;
+        const playerObject = isMobile ? camera : controls.getObject();
+        const playerPos = playerObject.position;
+
         if (playerPos.y < deathPlaneY) {
-          resetPlayer(true); // Player has fallen and died
+          resetPlayer(true);
           return;
         }
 
@@ -626,10 +815,19 @@
         const isSprinting = keys["ShiftLeft"] || keys["ShiftRight"];
         const currentSpeed = moveSpeed * (isSprinting ? sprintMultiplier : 1.0);
         const speed = currentSpeed * delta;
-        if (keys["KeyW"]) controls.moveForward(speed);
-        if (keys["KeyS"]) controls.moveForward(-speed);
-        if (keys["KeyA"]) controls.moveRight(-speed);
-        if (keys["KeyD"]) controls.moveRight(speed);
+
+        const forward = new THREE.Vector3();
+        playerObject.getWorldDirection(forward);
+        forward.y = 0;
+        forward.normalize();
+
+        const right = new THREE.Vector3();
+        right.crossVectors(forward, playerObject.up).normalize();
+
+        if (keys["KeyW"]) playerPos.addScaledVector(forward, speed);
+        if (keys["KeyS"]) playerPos.addScaledVector(forward, -speed);
+        if (keys["KeyA"]) playerPos.addScaledVector(right, -speed);
+        if (keys["KeyD"]) playerPos.addScaledVector(right, speed);
 
         playerPos.y += velocityY * delta;
 
@@ -648,7 +846,7 @@
         ) {
           const groundObject = intersects[0].object;
           if (groundObject.userData.type === "hazard") {
-            resetPlayer(true); // Player hit a hazard and died
+            resetPlayer(true);
             return;
           }
           playerPos.y = intersects[0].point.y + playerHeight;
@@ -685,7 +883,8 @@
               ) < interactionDistance
             ) {
               const perk = perks[icon.userData.perkId];
-              promptToShow = `Press [E] to get <strong>${perk.name}</strong><br><small>${perk.description}</small>`;
+              const action = isMobile ? "Tap 'E'" : "Press [E]";
+              promptToShow = `${action} to get <strong>${perk.name}</strong><br><small>${perk.description}</small>`;
               break;
             }
           }
@@ -694,7 +893,8 @@
           currentGoal &&
           camera.position.distanceTo(currentGoal.position) < interactionDistance
         ) {
-          promptToShow = `Press [E] to advance to Level ${currentLevel + 1}!`;
+          const action = isMobile ? "Tap 'E'" : "Press [E]";
+          promptToShow = `${action} to advance to Level ${currentLevel + 1}!`;
         }
         interactionPrompt.style.display = promptToShow ? "block" : "none";
         if (promptToShow) interactionPrompt.innerHTML = promptToShow;
@@ -731,23 +931,20 @@
         if (e.code === "KeyE") onKeyE();
       });
 
-      // ======== RENDER LOOP ========
       function animate() {
         requestAnimationFrame(animate);
         const delta = clock.getDelta();
         const elapsedTime = clock.getElapsedTime();
 
         if (gameState === "playing") {
-          if (controls.isLocked) {
+          if (isMobile || (!isMobile && controls.isLocked)) {
             updateMovement(delta);
             handleInteractions();
           }
 
-          // Update stopwatch
           totalTimePlayed = elapsedTime - roundStartTime;
           stopwatchDisplay.textContent = `${totalTimePlayed.toFixed(2)}s`;
 
-          // Dynamic object updates
           movingObstacles.forEach((obs) => {
             const movement =
               Math.sin(elapsedTime * obs.userData.moveSpeed) *
@@ -767,7 +964,6 @@
         composer.render();
       }
 
-      // Initial setup
       showStartScreen();
       animate();
     </script>
